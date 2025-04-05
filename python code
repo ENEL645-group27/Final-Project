@@ -2,16 +2,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-from torchvision import datasets, transforms, models
+from torchvision import datasets, transforms
 from sklearn.metrics import accuracy_score, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
+import os
 
 # Hyperparameters
 batch_size = 32
-epochs = 10
-img_size = 150  # Resize all images to 150x150
+epochs = 15  # Increased epochs for potential better learning
+img_size = 150
+learning_rate = 0.0005 # Reduced learning rate for finer tuning
+weight_decay = 1e-4  # L2 regularization strength
 
 # Set the device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,6 +22,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Data augmentation and normalization for training and validation
 transform = transforms.Compose([
     transforms.Resize((img_size, img_size)),
+    transforms.RandomHorizontalFlip(), # Data Augmentation
+    transforms.RandomRotation(10), #Data Augmentation
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
@@ -28,7 +33,7 @@ dataset = datasets.ImageFolder('~/kaggle/Detect_solar_dust', transform=transform
 
 # Split the dataset into train, validation, and test sets
 train_size = int(0.7 * len(dataset))
-val_size = int(0.2 * len(dataset))
+val_size = int(0.15 * len(dataset)) # Modified to 15% val, 15% test
 test_size = len(dataset) - train_size - val_size
 train_data, val_data, test_data = random_split(dataset, [train_size, val_size, test_size])
 
@@ -37,7 +42,7 @@ train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
-# Define the CNN model
+# Define the CNN model with dropout
 class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
@@ -45,6 +50,7 @@ class CNNModel(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.fc1 = nn.Linear(128 * (img_size // 8) * (img_size // 8), 512)
+        self.dropout = nn.Dropout(0.5) # Dropout regularization
         self.fc2 = nn.Linear(512, 1)
         self.sigmoid = nn.Sigmoid()
 
@@ -55,16 +61,17 @@ class CNNModel(nn.Module):
         x = torch.max_pool2d(x, 2)
         x = torch.relu(self.conv3(x))
         x = torch.max_pool2d(x, 2)
-        x = x.view(x.size(0), -1)  # Flatten the tensor
+        x = x.view(x.size(0), -1)
         x = torch.relu(self.fc1(x))
+        x = self.dropout(x)
         x = self.fc2(x)
         x = self.sigmoid(x)
         return x
 
 # Initialize the model, loss function, and optimizer
 model = CNNModel().to(device)
-criterion = nn.BCELoss()  # Binary Cross Entropy Loss
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay) # L2 regularization
 
 # Train the model
 def train_model():
@@ -75,7 +82,7 @@ def train_model():
         total = 0
         for inputs, labels in train_loader:
             inputs, labels = inputs.to(device), labels.to(device)
-            
+
             optimizer.zero_grad()
             outputs = model(inputs)
             labels = labels.float().view(-1, 1)
@@ -84,7 +91,7 @@ def train_model():
             optimizer.step()
 
             running_loss += loss.item()
-            predicted = (outputs > 0.5).float()  # Convert sigmoid output to 0 or 1
+            predicted = (outputs > 0.5).float()
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
@@ -121,12 +128,23 @@ print("Confusion Matrix:")
 print(conf_matrix)
 
 # Plot confusion matrix
-def plot_confusion_matrix(cm):
+def plot_confusion_matrix(cm, save_path=None):
     plt.figure(figsize=(6, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Clean', 'Dusty'], yticklabels=['Clean', 'Dusty'])
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
     plt.title('Confusion Matrix')
-    plt.show()
+    if save_path:
+        plt.savefig(save_path)
+        plt.close()
+        print(f"Confusion matrix saved to: {save_path}")
+    else:
+        plt.show()
 
-plot_confusion_matrix(conf_matrix)
+# Create 'outputs' directory if it doesn't exist
+output_dir = 'outputs'
+os.makedirs(output_dir, exist_ok=True)
+confusion_matrix_path = os.path.join(output_dir, 'confusion_matrix1.png')
+
+# Plot and save the confusion matrix
+plot_confusion_matrix(conf_matrix, save_path=confusion_matrix_path)
