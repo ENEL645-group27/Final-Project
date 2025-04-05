@@ -141,7 +141,7 @@ def plot_confusion_matrix(cm, save_path=None):
     else:
         plt.show()
 
-# Create 'outputs' directory if it doesn't exist
+# Create 'outputs' directory
 output_dir = 'outputs'
 os.makedirs(output_dir, exist_ok=True)
 confusion_matrix_path = os.path.join(output_dir, 'confusion_matrix1.png')
